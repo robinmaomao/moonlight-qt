@@ -22,6 +22,7 @@ of Windows handhelds, e.g. ROG Xbox Ally X).
 
 | Setting | Result |
 |---|---|
+| 62.5 Hz (16 ms) | at most every 16 ms (lowest selectable rate) |
 | 125 Hz (8 ms) — default in this branch | axis/trigger state sent at most every 8 ms |
 | 250 Hz (4 ms) | at most every 4 ms |
 | 500 Hz (2 ms) | at most every 2 ms |
