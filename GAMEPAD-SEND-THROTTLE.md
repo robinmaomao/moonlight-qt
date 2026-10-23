@@ -18,6 +18,24 @@ of Windows handhelds, e.g. ROG Xbox Ally X).
   fixed 8 ms (125 Hz). This patch reproduces only that part, without HidHide, without a
   virtual pad / kernel driver, and without touching Armoury Crate SE.
 
+### Why the trailing flush does not use an SDL timer
+
+Windows builds ship `SDL2.dll` as sdl2-compat over `SDL3.dll`. sdl2-compat's
+`SDL_RemoveTimer()` calls `SDL3_ClearProperty()` (which destroys the timer's
+properties) *before* `SDL3_RemoveTimer()` cancels the timer. If the timer fires in
+that window, `CompatTimerCallback()` reads the destroyed properties and crashes
+inside SDL3's SRW lock helpers.
+
+With 1-8 ms timers created and cancelled at a high rate while a 1000 Hz stick moves,
+the race is hit reliably: observed crash dumps pointed at `SDL3.dll+0x1B8444`,
+symbolised as `SDL_UnlockRWLock_srw`. The throttle therefore marks the state as
+pending and lets the SDL main loop flush it by timestamp instead.
+
+The same deadline mechanism now covers every input timer. Touch long-press, drag and
+tap-release, plus the gamepad mouse-emulation tick, are checked from the main loop.
+No input path calls `SDL_AddTimer()` / `SDL_RemoveTimer()` anymore, and mouse
+emulation no longer touches gamepad state from the SDL timer thread.
+
 ## Behaviour
 
 | Setting | Result |
@@ -33,12 +51,14 @@ Guarantees:
 
 * Button and trigger **edges** are still sent immediately, so click latency is unchanged.
 * The **trailing state is always delivered**. If an axis change lands inside the window,
-  a one-shot SDL timer pushes a user event and the main thread flushes the pending state,
-  so the host can never be left with a stale stick position (which would look like a
-  permanently drifting camera).
-* The timer callback only calls `SDL_PushEvent()`; gamepad state is only touched from the
-  event loop.
-* Mouse, keyboard, touch, gyro/accel, rumble, adaptive triggers and LEDs are untouched.
+  the main loop sends it as soon as the window elapses, so the host can never be left
+  with a stale stick position (which would look like a permanently drifting camera).
+* No SDL timers are used anywhere in the input path. Pending state and deadlines are
+  only touched from the event loop, and `SDL_WaitEventTimeout()` is capped by the
+  nearest deadline so nothing can be delayed by an idle wait.
+* Touch gestures and gamepad mouse emulation keep their original timings; only the
+  timer implementation changed. Mouse, keyboard, gyro/accel, rumble, adaptive triggers
+  and LEDs are untouched.
 
 ## Files changed
 
@@ -46,10 +66,12 @@ Guarantees:
 |---|---|
 | `app/settings/streamingpreferences.h` | `gamepadSendIntervalMs` property, member, signal |
 | `app/settings/streamingpreferences.cpp` | `gamepadsendintervalms` key, `qBound(0, …, 100)`, default 8 |
-| `app/streaming/input/input.h` | `SDL_CODE_GAMEPAD_STATE_FLUSH`, three `GamepadState` fields, handler API |
-| `app/streaming/input/input.cpp` | read the preference in the ctor, cancel timers in the dtor |
-| `app/streaming/input/gamepad.cpp` | `queueGamepadState()` / `cancelPendingGamepadFlush()` / `flushPendingGamepadState()` / timer callback, axis path switched to the throttle, button edges reset the window, device removal cancels the timer |
-| `app/streaming/session.cpp` | dispatch `SDL_CODE_GAMEPAD_STATE_FLUSH` to `flushPendingGamepadState()` |
+| `app/streaming/input/input.h` | `sendPending` / `lastSendTime` / `mouseEmulationDeadline` fields, deadline helpers, handler API (`runExpiredInputTimers()`, `getNextTimerDelayMs()`) |
+| `app/streaming/input/input.cpp` | read the preference in the ctor; deadline arming/expiry dispatch in the main loop |
+| `app/streaming/input/gamepad.cpp` | `queueGamepadState()` / `cancelPendingGamepadFlush()` / `flushPendingGamepadState()`, axis path switched to the throttle, button edges reset the window, device removal cancels the pending flush, mouse emulation switched to a deadline |
+| `app/streaming/input/abstouch.cpp` | long-press timer replaced by a main-loop deadline |
+| `app/streaming/input/reltouch.cpp` | drag and tap-release timers replaced by main-loop deadlines |
+| `app/streaming/session.cpp` | run expired input timers and flush pending state each loop iteration; cap the `SDL_WaitEventTimeout()` timeout |
 | `app/gui/SettingsView.qml` | "Controller update rate" combo box in Gamepad Settings |
 
 Upstream intent (if this is ever proposed as a PR): default to `0` so behaviour is
