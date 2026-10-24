@@ -51,6 +51,16 @@
 	</screenshots>
 
 	<releases>
+		<release version="6.2.1-gamepad-throttle" date="2026-10-24">
+			<description>
+				<p>Local feature build based on Moonlight 6.2.0:</p>
+				<ul>
+					<li>Added client-side gamepad state send throttling to avoid host frame pacing hitches with high-polling-rate controllers</li>
+					<li>Added a 62.5 Hz gamepad update rate option</li>
+					<li>Includes the upstream SDL2-compat timer use-after-free crash fix</li>
+				</ul>
+			</description>
+		</release>
 		<release version="6.2.0" date="2026-10-03">
 			<description>
 				<p>New features:</p>

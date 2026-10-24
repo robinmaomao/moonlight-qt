@@ -578,5 +578,10 @@ macx {
     }
 }
 
-VERSION = "$$cat(version.txt)"
-DEFINES += VERSION_STR=\\\"$$cat(version.txt)\\\"
+VERSION_STR_VALUE = $$cat(version.txt)
+
+# qmake writes VERSION into the Windows resource file, which only accepts numeric
+# components, so strip any build metadata suffix (e.g. "-gamepad-throttle") there
+# while keeping the full string for display and packaging.
+VERSION = $$section(VERSION_STR_VALUE, -, 0, 0)
+DEFINES += VERSION_STR=\\\"$$VERSION_STR_VALUE\\\"
